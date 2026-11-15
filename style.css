@@ -17,9 +17,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Noto Sa
 .fab.on{background:var(--acc);color:#fff}
 .hint{position:absolute;left:10px;right:64px;top:122px;z-index:20;background:rgba(29,36,48,.9);color:#fff;border-radius:10px;padding:8px 12px;font-size:13.5px;display:none}
 .sheet{position:absolute;left:0;right:0;bottom:0;z-index:30;background:#fff;border-radius:16px 16px 0 0;box-shadow:0 -4px 18px rgba(0,0,0,.14);height:var(--sheet);max-height:88vh;display:flex;flex-direction:column;transition:height .2s;padding-bottom:env(safe-area-inset-bottom)}
-.sheet.min{height:64px}.sheet.max{height:86vh}
-.grab{height:22px;flex:none;cursor:ns-resize;display:flex;align-items:center;justify-content:center;touch-action:none}
-.grab::after{content:"";width:42px;height:5px;border-radius:3px;background:#d3d7dd}
+.grab{height:30px;flex:none;cursor:ns-resize;display:flex;align-items:center;justify-content:center;touch-action:none}
+.grab::after{content:"";width:48px;height:6px;border-radius:3px;background:#d3d7dd}
 #panel{overflow:auto;padding:0 14px 18px;flex:1}
 @media(min-width:900px){
   .sheet{left:auto;top:0;width:400px;height:auto!important;max-height:none;border-radius:0;box-shadow:-2px 0 12px rgba(0,0,0,.1)}
@@ -102,3 +101,10 @@ table.cmp{width:100%;border-collapse:collapse;font-size:13px}table.cmp td,table.
 .mini .mut{font-size:10.5px}
 .rate button.on:not([data-v]){background:#1d2430;border-color:#1d2430;color:#fff}
 @media(max-width:899px){.sheetmax .fab.voice{display:none}}
+.sheet.hid #panel{display:none}
+.sheet.hid{box-shadow:0 -2px 10px rgba(0,0,0,.12)}
+@media(min-width:900px){
+  .panelhid .sheet{display:none}
+  .panelhid #map,.panelhid #top{right:0}.panelhid #fabs{right:10px}.panelhid .hint{right:70px}
+  .panelhid .fab.voice{right:14px}
+}

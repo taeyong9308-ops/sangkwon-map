@@ -81,9 +81,17 @@ create table if not exists public.voice_log (
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
 
+-- 앱 개선 요청
+create table if not exists public.feedback (
+  id uuid primary key default gen_random_uuid(),
+  region_id uuid references public.regions(id) on delete set null,
+  text text not null default '', at timestamptz not null default now(), view text, done boolean default false, reply text default '',
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+);
+
 -- 로그인한 사람만 읽고 쓰기 + 실시간 동기화
 do $$ declare t text; begin
-  foreach t in array array['regions','lines','stores','store_obs','listings','pins','voice_log'] loop
+  foreach t in array array['regions','lines','stores','store_obs','listings','pins','voice_log','feedback'] loop
     execute format('alter table public.%I enable row level security', t);
     execute format('drop policy if exists "auth all" on public.%I', t);
     execute format('create policy "auth all" on public.%I for all to authenticated using (true) with check (true)', t);

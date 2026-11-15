@@ -8,7 +8,7 @@ const COL = {"많음":"#D6452B","보통":"#F0A43A","적음":"#7E98B3","":"#9AA3A
 const TAGS = ["직장인","가족·유모차","어르신","커플","주민","퇴근 통행","목적 방문","임대문의 많음","응달·북향","야장","배달 많음","웨이팅","주말 휴무 많음"];
 const LST_STATUS = ["검토중","임장 완료","보류","탈락","협의중","계약"];
 const OPEN = ["영업","준비중","휴무"];
-const TABLES = ["regions","lines","stores","store_obs","listings","pins","voice_log"];
+const TABLES = ["regions","lines","stores","store_obs","listings","pins","voice_log","feedback"];
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const slotName = k => (SLOTS.find(s => s[0] === k) || [0,"전체"])[1];
@@ -311,8 +311,47 @@ $("#searchForm").onsubmit = e => {
     sel = null; view = "search"; sheetSize("mid"); panel();
   }, { location: map.getCenter(), radius: 5000, sort: K().services.SortBy.ACCURACY });
 };
-function sheetSize(s) { const el = $("#sheet"); document.body.classList.toggle("sheetmax", s === "max"); el.classList.toggle("min", s === "min"); el.classList.toggle("max", s === "max"); document.documentElement.style.setProperty("--sheet", s === "min" ? "64px" : s === "max" ? "86vh" : "46vh"); }
-$("#grab").onclick = () => { const el = $("#sheet"); sheetSize(el.classList.contains("min") ? "mid" : el.classList.contains("max") ? "min" : "max"); };
+// 아래 목록 화면 높이: 끌어서 조절, 숨기기/보이기. 'mid'는 마지막으로 끌어 놓은 높이를 기억
+const HIDE_H = 30;
+let sheetH = +localStorage.getItem("sheetH") || 0, sheetHidden = localStorage.getItem("sheetHidden") === "1";
+const vh = () => window.innerHeight;
+const clampH = h => Math.max(HIDE_H, Math.min(vh() * 0.9, h));
+function applySheet(h, anim = true) {
+  const el = $("#sheet"); el.style.transition = anim ? "" : "none";
+  document.documentElement.style.setProperty("--sheet", h + "px");
+  const hid = h <= HIDE_H + 4; el.classList.toggle("hid", hid); document.body.classList.toggle("sheethid", hid);
+  document.body.classList.toggle("sheetmax", h >= vh() * 0.8);
+  $("#fSheet").textContent = hid ? "▴" : "▾"; $("#fSheet").title = hid ? "목록 보이기" : "목록 숨기기";
+  if (map && window.innerWidth >= 900) setTimeout(() => map.relayout && map.relayout(), 220);
+}
+function sheetSize(s) {
+  if (window.innerWidth >= 900) { if (s !== "min" && sheetHidden) toggleSheet(false); return; }
+  if (s === "max") return applySheet(Math.round(vh() * 0.86));
+  if (s === "min") return applySheet(HIDE_H);
+  if (sheetHidden && !s.force) { sheetHidden = false; localStorage.setItem("sheetHidden", "0"); }
+  applySheet(clampH(sheetH || Math.round(vh() * 0.42)));
+}
+function toggleSheet(hide) {
+  sheetHidden = hide == null ? !sheetHidden : hide; localStorage.setItem("sheetHidden", sheetHidden ? "1" : "0");
+  document.body.classList.toggle("panelhid", sheetHidden && window.innerWidth >= 900);
+  if (window.innerWidth >= 900) { $("#fSheet").textContent = sheetHidden ? "◂" : "▸"; $("#fSheet").title = sheetHidden ? "목록 보이기" : "목록 숨기기"; setTimeout(() => map && map.relayout && map.relayout(), 50); return; }
+  sheetHidden ? applySheet(HIDE_H) : applySheet(clampH(sheetH || Math.round(vh() * 0.42)));
+}
+$("#fSheet").onclick = () => toggleSheet();
+(() => {
+  const g = $("#grab"); let y0 = 0, h0 = 0, moved = false, drag = false;
+  g.addEventListener("pointerdown", e => { drag = true; moved = false; y0 = e.clientY; h0 = $("#sheet").getBoundingClientRect().height; g.setPointerCapture(e.pointerId); });
+  g.addEventListener("pointermove", e => { if (!drag) return; const dy = y0 - e.clientY; if (Math.abs(dy) > 4) moved = true; if (moved) applySheet(clampH(h0 + dy), false); });
+  const end = e => {
+    if (!drag) return; drag = false;
+    if (!moved) return toggleSheet();          // 손잡이 탭 = 숨기기/보이기
+    const h = $("#sheet").getBoundingClientRect().height;
+    if (h < 90) { sheetHidden = true; localStorage.setItem("sheetHidden", "1"); return applySheet(HIDE_H); }
+    sheetHidden = false; localStorage.setItem("sheetHidden", "0");
+    sheetH = Math.round(h); localStorage.setItem("sheetH", sheetH); applySheet(sheetH);
+  };
+  g.addEventListener("pointerup", end); g.addEventListener("pointercancel", end);
+})();
 document.addEventListener("keydown", e => { if (e.key === "Escape") { if (mode !== "sel") setMode("sel"); else { sel = null; view = "home"; renderAll(); } } });
 
 /* ---------------- 매장 관찰 ---------------- */
@@ -394,6 +433,7 @@ function parseVoice(text, defSlot) {
   const near = me && Date.now() - me.t < 120000 ? nearestLine(me) : null;
   for (const seg of splitSpeech(text)) {
     const sq = squash(seg);
+    if (/^(개선\s*요청|개선|앱|어플|요청)/.test(seg)) { out.push({ type: "feedback", note: seg.replace(/^(개선\s*요청|요청)\s*[:,]?\s*/, ""), slot: defSlot, on: true }); continue; }
     // 1) 매장 이름이 나오면 매장 관찰
     const S = stores.filter(S => storeKeys(S).some(k => sq.includes(k))).sort((a, b) => b.name.length - a.name.length)[0];
     const so = storeObsIn(seg);
@@ -428,6 +468,7 @@ function vApply() {
       if (it.note.trim()) { const prev = (L.notes[it.slot] || "").trim(); L.notes[it.slot] = (prev ? prev + "\n" : "") + t + " " + it.note.trim(); }
       Store.save("lines", L.id, 0); n++;
     } else if (it.type === "store" && it.id) { addObs(it.id, { ...it.obs, slot: it.slot, note: it.note }); n++; }
+    else if (it.type === "feedback" && it.note.trim()) { addFeedback(it.note.trim()); n++; }
     else if (it.type === "newstore" && it.name.trim()) {
       const p = me ? { lat: me.lat, lng: me.lng } : (map ? { lat: map.getCenter().getLat(), lng: map.getCenter().getLng() } : null); if (!p) continue;
       const S = put("stores", { name: it.name.trim(), category: "", lat: +p.lat.toFixed(6), lng: +p.lng.toFixed(6), line_id: (nearestLine(p, 40) || {}).id || null, memo: "위치는 기록 당시 내 위치 (옮겨 주세요)", tags: [], photos: [] });
@@ -472,7 +513,7 @@ function confirmUI(msg, label) { return `<div class="row" style="margin-top:16px
 function bindDel(fn) { $("#del").onclick = () => $("#cf").style.display = "block"; $("#delN").onclick = () => $("#cf").style.display = "none"; $("#delY").onclick = () => { sel = null; view = "home"; fn(); renderAll(); }; }
 function panel() {
   const el = $("#panel");
-  const V = { setup: setupPanel, login: loginPanel, redraw: redrawPanel, add: addPanel, voice: voicePanel, search: searchPanel, table: tablePanel, menu: menuPanel, regions: regionsPanel };
+  const V = { feedback: feedbackPanel, setup: setupPanel, login: loginPanel, redraw: redrawPanel, add: addPanel, voice: voicePanel, search: searchPanel, table: tablePanel, menu: menuPanel, regions: regionsPanel };
   if (V[view]) return V[view](el);
   if (view === "draw" || mode === "line") return drawPanel(el);
   if (view === "line" && sel && DB.lines[sel.id]) return linePanel(el, sel.id);
@@ -679,12 +720,13 @@ function voicePanel(el) {
    ${vMsg ? `<div class="sub" style="margin-top:8px;color:var(--acc)">${esc(vMsg)}</div>` : ""}
    ${vItems && vItems.length ? `<h2 style="margin-top:14px">확인 후 저장</h2>${vItems.map((it, i) => `<div class="vi ${it.on ? "" : "off"}" data-i="${i}">
       <div class="row"><input type="checkbox" class="vOn" ${it.on ? "checked" : ""}>
-       <select class="vType" style="width:auto"><option value="line" ${it.type === "line" ? "selected" : ""}>라인</option><option value="store" ${it.type === "store" ? "selected" : ""}>매장</option><option value="newstore" ${it.type === "newstore" ? "selected" : ""}>새 매장</option></select>
+       <select class="vType" style="width:auto"><option value="line" ${it.type === "line" ? "selected" : ""}>라인</option><option value="store" ${it.type === "store" ? "selected" : ""}>매장</option><option value="newstore" ${it.type === "newstore" ? "selected" : ""}>새 매장</option><option value="feedback" ${it.type === "feedback" ? "selected" : ""}>개선 요청</option></select>
        ${it.type === "line" ? `<select class="vId" style="flex:1"><option value="">— 라인 선택 —</option>${lines.map(L => `<option value="${L.id}" ${L.id === it.id ? "selected" : ""}>${esc(L.no + ". " + L.name)}</option>`).join("")}</select>`
         : it.type === "store" ? `<select class="vId" style="flex:1"><option value="">— 매장 선택 —</option>${stores.map(S => `<option value="${S.id}" ${S.id === it.id ? "selected" : ""}>${esc(S.name)}</option>`).join("")}</select>`
+        : it.type === "feedback" ? `<span class="mut small" style="flex:1">앱 개선 요청으로 저장돼요</span>`
         : `<input type="text" class="vName" style="flex:1" value="${esc(it.name || "")}" placeholder="새 매장 이름">`}</div>
       ${it.type === "line" ? `<div class="rate" style="margin-top:6px">${["많음","보통","적음",""].map(v => `<button data-v="${v}" class="${it.rating === v ? "on" : ""}">${v || "판정 없음"}</button>`).join("")}</div>${it.how ? `<div class="mut small">라인은 ${it.how}으로 찾았어요</div>` : ""}`
-        : `<div class="mut small" style="margin-top:4px">기록: <b>${esc(obsText(it.obs))}</b>${it.type === "newstore" ? " · 위치는 지금 내 위치로 저장돼요" : ""}</div>`}
+        : it.type === "feedback" ? "" : `<div class="mut small" style="margin-top:4px">기록: <b>${esc(obsText(it.obs))}</b>${it.type === "newstore" ? " · 위치는 지금 내 위치로 저장돼요" : ""}</div>`}
       <textarea class="vNote" style="min-height:44px;margin-top:6px">${esc(it.note)}</textarea></div>`).join("")}
      <button class="btn pri" id="vSave" style="width:100%;padding:10px">체크한 ${vItems.filter(x => x.on).length}건 저장</button>` : ""}
    ${voiceLogUI()}`;
@@ -770,6 +812,7 @@ function menuPanel(el) {
   el.innerHTML = `<div class="row" style="justify-content:space-between"><h2>메뉴</h2>${back(el, "닫기")}</div>
    <div class="sub">${Store.kind === "supa" ? (Store.user ? "클라우드 저장 · " + esc(Store.user.email || "") : "로그인 필요") : "이 기기에만 저장 중 (클라우드 연결 전)"}</div>
    <div class="list">
+    <div class="it" id="mFb">💡 앱 개선 요청 남기기·보기 <span class="mut small">(${Object.values(DB.feedback).filter(f => !f.done).length}건 대기)</span></div>
     <div class="it" id="mRegion">지역 바꾸기·새 지역</div>
     <div class="it" id="mZones">구역 경계 ${showZones ? "숨기기" : "보이기"}</div>
     <div class="it" id="mWatch">내 위치 계속 표시 ${watchId != null ? "끄기" : "켜기"}</div>
@@ -781,6 +824,7 @@ function menuPanel(el) {
    <div class="mut small" style="margin-top:14px">폰 홈 화면에 추가: 아이폰은 사파리 공유 → '홈 화면에 추가', 안드로이드는 크롬 메뉴 → '홈 화면에 추가'.</div>`;
   bindBack();
   $("#mRegion").onclick = () => { view = "regions"; panel(); };
+  $("#mFb").onclick = () => { view = "feedback"; panel(); };
   $("#mZones").onclick = () => { showZones = !showZones; localStorage.setItem("zones", showZones ? "1" : "0"); drawZones(); panel(); };
   $("#mWatch").onclick = () => { if (watchId != null) stopWatch(); else startWatch(); panel(); };
   $("#mCsv").onclick = () => download(`상권지도_${(DB.regions[region] || {}).name || ""}_${d}.csv`, csv(), "text/csv;charset=utf-8");
@@ -804,6 +848,21 @@ function loginPanel(el) {
     $("#go").disabled = false;
   };
 }
+function addFeedback(text) { return put("feedback", { text, at: now(), view: view, done: false, reply: "" }); }
+let fbText = "";
+function feedbackPanel(el) {
+  const F = Object.values(DB.feedback).sort((a, b) => (b.at || "").localeCompare(a.at || ""));
+  el.innerHTML = `<div class="row" style="justify-content:space-between"><h2>💡 앱 개선 요청</h2>${back(el, "닫기")}</div>
+   <div class="sub">쓰다가 불편한 점, 있었으면 하는 기능을 남겨 두세요. 다음에 Claude를 부르면 모아서 고쳐요.<br>음성 기입에서 "개선 요청 …"으로 시작해도 여기에 쌓여요.</div>
+   <div class="row" style="align-items:flex-start"><textarea id="fbT" placeholder="예: 매장 기록할 때 웨이팅 버튼도 있었으면">${esc(fbText)}</textarea><button class="btn mic" id="fbM">🎤</button></div>
+   <button class="btn pri" id="fbS" style="margin-top:8px">남기기</button>
+   <div class="list" style="margin-top:12px">${F.map(f => `<div class="it" style="cursor:default;${f.done ? "opacity:.5" : ""}"><span class="dot" style="background:${f.done ? "#2e7d32" : "#f0a43a"}">${f.done ? "✓" : "!"}</span><div style="flex:1"><div>${esc(f.text)}</div><div class="mut small">${md(f.at)} ${hhmm(f.at)}${f.reply ? " · " + esc(f.reply) : ""}</div></div><button class="btn small" data-fd="${f.id}">✕</button></div>`).join("") || `<div class="mut small">아직 요청이 없어요</div>`}</div>`;
+  bindBack();
+  $("#fbT").oninput = e => fbText = e.target.value;
+  mic($("#fbM"), $("#fbT"));
+  $("#fbS").onclick = () => { const t = $("#fbT").value.trim(); if (!t) return; addFeedback(t); fbText = ""; toast("남겼어요"); panel(); };
+  el.querySelectorAll("[data-fd]").forEach(b => b.onclick = () => { Store.remove("feedback", b.dataset.fd); panel(); });
+}
 function setupPanel(el) {
   el.innerHTML = `<h2>지도를 불러오지 못했어요</h2><div class="sub">인터넷 연결이나 카카오 키의 도메인 등록을 확인해 주세요. 목록·편집은 그대로 쓸 수 있어요.</div>
    <div class="row"><button class="btn" id="cont">목록 보기</button></div>`;
@@ -818,7 +877,7 @@ onMapClick = function (lat, lon) {
 
 /* ---------------- start ---------------- */
 (async () => {
-  sheetSize("mid");
+  if (window.innerWidth >= 900) { toggleSheet(sheetHidden); } else if (sheetHidden) applySheet(HIDE_H, false); else applySheet(clampH(sheetH || Math.round(vh() * 0.42)), false);
   try { await loadKakao(); initMap(); }
   catch (e) { view = "setup"; }
   await Store.init();
