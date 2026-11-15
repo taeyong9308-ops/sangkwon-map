@@ -8,6 +8,10 @@ const COL = {"많음":"#D6452B","보통":"#F0A43A","적음":"#7E98B3","":"#9AA3A
 const TAGS = ["직장인","가족·유모차","어르신","커플","주민","퇴근 통행","목적 방문","임대문의 많음","응달·북향","야장","배달 많음","웨이팅","주말 휴무 많음"];
 const LST_STATUS = ["검토중","임장 완료","보류","탈락","협의중","계약"];
 const OPEN = ["영업","준비중","휴무"];
+// 매물 출처별 색: 네이버부동산(온라인 확인) / 현장 방문(부동산 직접 방문해서 얻은 정보)
+const SRC = [["네이버부동산","#2f6fd6"],["현장 방문","#c2410c"],["기타","#6b7280"]];
+const srcOf = P => { const v = String(P.source || ""); if (/현장|방문|중개|부동산 사무/.test(v) && !/네이버/.test(v)) return "현장 방문"; if (/네이버/.test(v)) return "네이버부동산"; return v ? "기타" : "네이버부동산"; };
+const srcCol = P => (SRC.find(x => x[0] === srcOf(P)) || SRC[2])[1];
 const TABLES = ["regions","lines","stores","store_obs","listings","pins","voice_log","feedback"];
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -196,7 +200,8 @@ function renderMap() {
   if (layers.listing) for (const P of list("listings")) {
     const on = isSel("listing", P.id), dim = P.status === "탈락";
     const el = document.createElement("div"); el.className = "lsm" + (on ? " sel" : "") + (dim ? " dim" : "");
-    el.innerHTML = `<div class="b">${esc(P.rent ? "월 " + won(num(P.rent)) : (P.title || "매물").slice(0, 8))}</div><div class="t"></div>`;
+    const sc = on ? "#3b2a8f" : srcCol(P);
+    el.innerHTML = `<div class="b" style="background:${sc}">${srcOf(P) === "현장 방문" ? "● " : ""}${esc(P.rent ? "월 " + won(num(P.rent)) : (P.title || "매물").slice(0, 8))}</div><div class="t" style="border-top-color:${sc}"></div>`;
     tapEl(el, () => select("listing", P.id)); overlay(P.lat, P.lng, el, on ? 12 : 8, 1);
   }
   if (layers.pin) for (const p of list("pins")) {
@@ -263,7 +268,7 @@ function onMapClick(lat, lon) {
 function addAt(kind, lat, lng, place) {
   setMode("sel");
   if (kind === "store") { const S = put("stores", { name: place ? place.place_name : "", category: place ? (place.category_name || "").split(" > ").slice(-1)[0] : "", lat, lng, place: place || null, line_id: (nearestLine({ lat, lng }, 40) || {}).id || null, memo: "", tags: [], photos: [] }); select("store", S.id); focusSoon("#sName", !place); }
-  else if (kind === "listing") { const P = put("listings", { title: place ? place.place_name : "", address: place ? (place.road_address_name || place.address_name || "") : "", lat, lng, status: "검토중", source: "", floor: "1층", photos: [], memo: "", line_id: (nearestLine({ lat, lng }, 40) || {}).id || null }); select("listing", P.id); if (!P.address) fillAddress(P); focusSoon("#xTitle", !place); }
+  else if (kind === "listing") { const P = put("listings", { title: place ? place.place_name : "", address: place ? (place.road_address_name || place.address_name || "") : "", lat, lng, status: "검토중", source: "현장 방문", floor: "1층", photos: [], memo: "", line_id: (nearestLine({ lat, lng }, 40) || {}).id || null }); select("listing", P.id); if (!P.address) fillAddress(P); focusSoon("#xTitle", !place); }
   else { const p = put("pins", { title: place ? place.place_name : "", text: "", slot: "all", lat, lng, place: place || null, photos: [] }); select("pin", p.id); focusSoon("#pTitle", !place); }
 }
 function focusSoon(s, yes) { if (yes) setTimeout(() => { const i = $(s); if (i) i.focus(); }, 80); }
@@ -529,10 +534,11 @@ function homePanel(el) {
   let body = "";
   if (homeTab === "line") body = L.map(L => `<div class="it" data-l="${L.id}"><span class="dot">${esc(L.no)}</span><div style="flex:1"><div>${esc(L.name)} ${chip((L.ratings || {})[slot] || "")}</div><div class="mut small">${esc(L.zone || "")}${(L.notes || {})[slot] ? " · " + esc(L.notes[slot].split("\n").slice(-1)[0].slice(0, 70)) : ""}</div></div></div>`).join("") || `<div class="mut">아직 라인이 없어요. 오른쪽 ／ 버튼으로 그려 보세요.</div>`;
   if (homeTab === "store") body = S.sort((a, b) => a.name.localeCompare(b.name, "ko")).map(S => { const o = latestObs(S.id, slot), st = obsState(o); return `<div class="it" data-s="${S.id}"><span class="dot" style="background:${st.c};color:${st.c === "#ffffff" ? "#1d2430" : "#fff"};border:1px solid #ccd">${st.icon || ""}</span><div style="flex:1"><div>${esc(S.name || "(이름 없음)")} <span class="mut small">${esc(S.category || "")}</span></div><div class="mut small">${slotName(slot)}: ${esc(obsText(o))}${o ? " · " + md(o.at) + " " + hhmm(o.at) : ""}</div></div></div>`; }).join("") || `<div class="mut">아직 매장이 없어요. 검색해서 '매장으로 추가'하거나 ＋ 버튼으로 추가하세요.</div>`;
-  if (homeTab === "listing") body = X.sort((a, b) => (a.status === "탈락") - (b.status === "탈락")).map(P => `<div class="it" data-x="${P.id}"><span class="dot" style="background:#b42318">₩</span><div style="flex:1"><div>${esc(P.title || P.address || "(매물)")} <span class="tagx">${esc(P.status || "")}</span></div><div class="mut small">보증 ${won(num(P.deposit))} · 월 ${won(num(P.rent))}${num(P.premium) ? " · 권리 " + won(num(P.premium)) : ""}${num(P.area_ex) ? " · 전용 " + num(P.area_ex) + "평" : ""}</div></div></div>`).join("") || `<div class="mut">아직 매물이 없어요. ＋ 버튼 → 매물로 추가하세요.</div>`;
+  if (homeTab === "listing") body = X.sort((a, b) => (a.status === "탈락") - (b.status === "탈락")).map(P => `<div class="it" data-x="${P.id}"><span class="dot" style="background:${srcCol(P)}">₩</span><div style="flex:1"><div>${esc(P.title || P.address || "(매물)")} <span class="tagx">${esc(P.status || "")}</span></div><div class="mut small">보증 ${won(num(P.deposit))} · 월 ${won(num(P.rent))}${num(P.premium) ? " · 권리 " + won(num(P.premium)) : ""}${num(P.area_ex) ? " · 전용 " + num(P.area_ex) + "평" : ""}</div></div></div>`).join("") || `<div class="mut">아직 매물이 없어요. ＋ 버튼 → 매물로 추가하세요.</div>`;
   if (homeTab === "pin") body = P.map(p => `<div class="it" data-p="${p.id}"><span class="dot" style="background:#0f766e">✎</span><div style="flex:1"><div>${esc(p.title || "(제목 없음)")}</div><div class="mut small">${esc((p.text || "").slice(0, 80))}</div></div></div>`).join("") || `<div class="mut small">이 시간대 메모 없음</div>`;
   el.innerHTML = `<div class="htabs">${tabs.map(([k, t, n]) => `<button data-h="${k}" class="${homeTab === k ? "on" : ""}">${t} <b>${n}</b></button>`).join("")}</div>
     <div class="row small mut" style="margin:2px 0 6px;gap:12px">지도에 표시: ${tabs.map(([k, t]) => `<label><input type="checkbox" data-ly="${k}" ${layers[k] ? "checked" : ""}> ${t}</label>`).join("")}</div>
+    ${homeTab === "listing" ? `<div class="row small" style="gap:12px;margin-bottom:6px">${SRC.map(([k, c]) => `<span><span class="sdot" style="background:${c}"></span>${k} ${X.filter(P => srcOf(P) === k).length}</span>`).join("")}</div>` : ""}
     <div class="list">${body}</div>`;
   el.querySelectorAll("[data-h]").forEach(b => b.onclick = () => { homeTab = b.dataset.h; localStorage.setItem("homeTab", homeTab); panel(); });
   el.querySelectorAll("[data-ly]").forEach(c => c.onchange = () => { layers[c.dataset.ly] = c.checked; localStorage.setItem("layers", JSON.stringify(layers)); renderMap(); });
@@ -583,7 +589,7 @@ function linePanel(el, id) {
    <label class="f">라인 특징 메모 (시간대 공통)</label>
    <div class="row"><textarea id="lMemo" placeholder="예: 북향, 1층 임대문의 4곳, 버스정류장 앞">${esc(L.memo || "")}</textarea><button class="btn mic" id="m2">🎤</button></div>
    ${stores.length ? `<label class="f">이 라인 매장 ${stores.length}개 (${slotName(slot)})</label><div class="list">${stores.map(S => `<div class="it" data-s="${S.id}"><span class="dot" style="background:${obsState(latestObs(S.id, slot)).c};border:1px solid #ccd"></span><div style="flex:1">${esc(S.name)} <span class="mut small">${esc(obsText(latestObs(S.id, slot)))}</span></div></div>`).join("")}</div>` : ""}
-   ${lst.length ? `<label class="f">이 라인 매물 ${lst.length}개</label><div class="list">${lst.map(P => `<div class="it" data-x="${P.id}"><span class="dot" style="background:#b42318">₩</span><div style="flex:1">${esc(P.title || P.address)} <span class="mut small">${won(num(P.deposit))}/${won(num(P.rent))}</span></div></div>`).join("")}</div>` : ""}
+   ${lst.length ? `<label class="f">이 라인 매물 ${lst.length}개</label><div class="list">${lst.map(P => `<div class="it" data-x="${P.id}"><span class="dot" style="background:${srcCol(P)}">₩</span><div style="flex:1">${esc(P.title || P.address)} <span class="mut small">${won(num(P.deposit))}/${won(num(P.rent))}</span></div></div>`).join("")}</div>` : ""}
    ${photosUI(L)}
    ${L.kind === "line" ? `<div class="row" style="margin-top:12px"><button class="btn" id="reDraw">선 모양 다시 그리기</button></div>` : `<label class="f">지점 크기 (미터)</label><input type="text" id="lR" inputmode="numeric" value="${esc(L.r_m || 35)}">`}
    ${confirmUI("이 라인과 네 시간대 메모를 모두 지울까요?", "라인 삭제")}`;
@@ -671,7 +677,8 @@ function listingPanel(el, id) {
    <div class="row" style="gap:8px">${F("deposit", "보증금", "10000", "만원")}${F("rent", "월세", "735", "만원")}</div>
    <div class="row" style="gap:8px">${F("premium", "권리금", "3000", "만원")}${F("mgmt", "관리비", "", "만원/월")}</div>
    <div class="row" style="gap:8px">${F("area_ex", "전용", "31", "평")}${F("area_ct", "계약", "69", "평")}</div>
-   <div class="row" style="gap:8px">${F("floor", "층", "1층", "", "text")}${F("source", "출처", "네이버부동산·중개사", "", "text")}</div>
+   <label class="f">정보 출처</label><div class="rate wrap src">${SRC.map(([k, c]) => `<button data-src="${k}" class="${srcOf(P) === k ? "on" : ""}" style="${srcOf(P) === k ? `background:${c};border-color:${c};color:#fff` : `color:${c};border-color:${c}66`}">${k}</button>`).join("")}</div>
+   <div class="row" style="gap:8px">${F("floor", "층", "1층", "", "text")}${F("broker", "중개사", "예: 마곡○○부동산", "", "text")}</div>
    <div class="kv">${perPy ? `전용 평당 월세 <b>${perPy}만</b>` : ""}${rent ? ` · 월 고정비(월세${mg ? "+관리비" : ""}) <b>${won(rent + (mg || 0))}</b>` : ""}</div>
    <label class="f">라인</label><select id="xLine"><option value="">(없음)</option>${sortedLines().map(L => `<option value="${L.id}" ${P.line_id === L.id ? "selected" : ""}>${esc(L.no + ". " + L.name)}</option>`).join("")}</select>
    ${P.line_id && DB.lines[P.line_id] ? `<div class="mini" style="margin-top:6px">${SLOTS.map(([k, t]) => { const r = (DB.lines[P.line_id].ratings || {})[k]; return `<div style="background:${r ? COL[r] + "33" : "#f1f2f4"}">${t}<br><b>${r || "—"}</b></div>`; }).join("")}</div>` : ""}
@@ -682,6 +689,7 @@ function listingPanel(el, id) {
   bindBack();
   el.querySelectorAll("[data-f]").forEach(i => i.oninput = e => { P[i.dataset.f] = e.target.value; Store.save("listings", id); if (["rent", "area_ex", "mgmt"].includes(i.dataset.f)) { const kv = el.querySelector(".kv"); const ex = num(P.area_ex), rent = num(P.rent), mg = num(P.mgmt); kv.innerHTML = (ex && rent ? `전용 평당 월세 <b>${(rent / ex).toFixed(1)}만</b>` : "") + (rent ? ` · 월 고정비 <b>${won(rent + (mg || 0))}</b>` : ""); } });
   el.querySelectorAll("[data-f]").forEach(i => i.onchange = () => renderMap());
+  el.querySelectorAll("[data-src]").forEach(b => b.onclick = () => { P.source = b.dataset.src; Store.save("listings", id, 0); renderAll(); });
   el.querySelectorAll("[data-st]").forEach(b => b.onclick = () => { P.status = b.dataset.st; Store.save("listings", id, 0); renderAll(); });
   $("#xLine").onchange = e => { P.line_id = e.target.value || null; Store.save("listings", id, 0); panel(); };
   mic($("#m5"), el.querySelector('textarea[data-f="memo"]'));
@@ -772,8 +780,8 @@ function tablePanel(el) {
    ${sortedLines().map(L => `<tr data-l="${L.id}"><td><b>${esc(L.no)}</b> ${esc(L.name)}<div class="mut small">${esc(L.zone || "")}${(L.tags || []).length ? " · " + esc(L.tags.join(", ")) : ""}</div></td>${SLOTS.map(([k]) => `<td>${chip((L.ratings || {})[k] || "")}</td>`).join("")}</tr>`).join("")}</table>`;
   if (tableTab === "store") body = `<table class="cmp"><tr><th>매장</th>${SLOTS.map(s => `<th>${s[1].replace(" ", "<br>")}</th>`).join("")}</tr>
    ${list("stores").sort((a, b) => a.name.localeCompare(b.name, "ko")).map(S => `<tr data-s="${S.id}"><td><b>${esc(S.name)}</b><div class="mut small">${esc(S.category || "")}${S.line_id && DB.lines[S.line_id] ? " · " + DB.lines[S.line_id].no + "번 라인" : ""}</div></td>${SLOTS.map(([k]) => { const o = latestObs(S.id, k); return `<td class="small">${o ? `<span class="sdot" style="background:${obsState(o).c}"></span>${esc(obsText(o))}` : `<span class="mut">—</span>`}</td>`; }).join("")}</tr>`).join("")}</table>`;
-  if (tableTab === "listing") body = `<table class="cmp"><tr><th>매물</th><th>보증금</th><th>월세</th><th>권리금</th><th>전용</th><th>평당</th><th>상태</th></tr>
-   ${list("listings").map(P => { const ex = num(P.area_ex), r = num(P.rent); return `<tr data-x="${P.id}"><td><b>${esc(P.title || P.address || "(매물)")}</b><div class="mut small">${esc(P.floor || "")}${P.line_id && DB.lines[P.line_id] ? " · " + DB.lines[P.line_id].no + "번 라인" : ""}</div></td><td>${won(num(P.deposit))}</td><td>${won(r)}</td><td>${won(num(P.premium))}</td><td>${ex ? ex + "평" : "—"}</td><td>${ex && r ? (r / ex).toFixed(1) : "—"}</td><td class="small">${esc(P.status || "")}</td></tr>`; }).join("")}</table>`;
+  if (tableTab === "listing") body = `<table class="cmp"><tr><th>매물</th><th>보증금</th><th>월세</th><th>권리금</th><th>전용</th><th>평당</th><th>출처</th><th>상태</th></tr>
+   ${list("listings").map(P => { const ex = num(P.area_ex), r = num(P.rent); return `<tr data-x="${P.id}"><td><b>${esc(P.title || P.address || "(매물)")}</b><div class="mut small">${esc(P.floor || "")}${P.line_id && DB.lines[P.line_id] ? " · " + DB.lines[P.line_id].no + "번 라인" : ""}</div></td><td>${won(num(P.deposit))}</td><td>${won(r)}</td><td>${won(num(P.premium))}</td><td>${ex ? ex + "평" : "—"}</td><td>${ex && r ? (r / ex).toFixed(1) : "—"}</td><td class="small"><span class="sdot" style="background:${srcCol(P)}"></span>${srcOf(P) === "현장 방문" ? "현장" : srcOf(P) === "네이버부동산" ? "네이버" : "기타"}</td><td class="small">${esc(P.status || "")}</td></tr>`; }).join("")}</table>`;
   el.innerHTML = `<div class="row" style="justify-content:space-between"><h2>비교표</h2>${back(el, "닫기")}</div>
    <div class="htabs">${[["line", "라인"], ["store", "매장"], ["listing", "매물"]].map(([k, t]) => `<button data-t="${k}" class="${tableTab === k ? "on" : ""}">${t}</button>`).join("")}</div>
    <div style="overflow-x:auto">${body}</div>`;
@@ -790,8 +798,8 @@ function csv() {
   sortedLines().forEach(L => out.push(row([L.no, L.name, L.zone, L.kind === "node" ? "지점" : "라인", ...SLOTS.flatMap(([k]) => [(L.ratings || {})[k] || "", (L.notes || {})[k] || ""]), (L.tags || []).join(", "), L.memo])));
   out.push("", row(["[매장 기록]"]), row(["매장", "업종", "라인", "일시", "시간대", "영업", "혼잡%", "만석", "웨이팅(팀)", "손님(팀)", "메모"]));
   list("stores").forEach(S => obsOf(S.id).forEach(o => out.push(row([S.name, S.category, S.line_id && DB.lines[S.line_id] ? DB.lines[S.line_id].no : "", new Date(o.at).toLocaleString("ko-KR"), slotName(o.slot), o.open, o.pct ?? "", o.is_full ? "Y" : "", o.wait || "", o.teams || "", o.note]))));
-  out.push("", row(["[매물]"]), row(["이름", "주소", "층", "상태", "보증금(만)", "월세(만)", "권리금(만)", "관리비(만)", "전용(평)", "계약(평)", "평당 월세", "출처", "라인", "메모"]));
-  list("listings").forEach(P => { const ex = num(P.area_ex), r = num(P.rent); out.push(row([P.title, P.address, P.floor, P.status, P.deposit, P.rent, P.premium, P.mgmt, P.area_ex, P.area_ct, ex && r ? (r / ex).toFixed(1) : "", P.source, P.line_id && DB.lines[P.line_id] ? DB.lines[P.line_id].no : "", P.memo])); });
+  out.push("", row(["[매물]"]), row(["이름", "주소", "층", "상태", "보증금(만)", "월세(만)", "권리금(만)", "관리비(만)", "전용(평)", "계약(평)", "평당 월세", "출처", "중개사", "라인", "메모"]));
+  list("listings").forEach(P => { const ex = num(P.area_ex), r = num(P.rent); out.push(row([P.title, P.address, P.floor, P.status, P.deposit, P.rent, P.premium, P.mgmt, P.area_ex, P.area_ct, ex && r ? (r / ex).toFixed(1) : "", srcOf(P), P.broker || "", P.line_id && DB.lines[P.line_id] ? DB.lines[P.line_id].no : "", P.memo])); });
   out.push("", row(["[메모]"]), row(["제목", "시간대", "내용", "위도", "경도"]));
   list("pins").forEach(p => out.push(row([p.title, slotName(p.slot), p.text, p.lat, p.lng])));
   return "﻿" + out.join("\n");

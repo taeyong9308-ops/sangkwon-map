@@ -61,6 +61,8 @@ create table if not exists public.listings (
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
 
+alter table public.listings add column if not exists broker text default '';
+
 -- 메모 핀
 create table if not exists public.pins (
   id uuid primary key default gen_random_uuid(),
