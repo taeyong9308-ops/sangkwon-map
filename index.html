@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
+<meta name="theme-color" content="#1d2430">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="상권지도">
+<title>상권 기입 지도</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header id="top">
+    <form id="searchForm" autocomplete="off">
+      <input id="q" type="search" placeholder="상호·건물·주소 검색 (예: 비바나폴리)" enterkeyhint="search">
+      <button type="submit" class="ic" aria-label="검색">🔍</button>
+    </form>
+    <div class="seg" id="slots"></div>
+  </header>
+
+  <div id="map"></div>
+  <div id="hint" class="hint"></div>
+
+  <div id="fabs">
+    <button class="fab" id="fLoc" title="내 위치">◎</button>
+    <button class="fab" id="fLine" title="라인 그리기">／</button>
+    <button class="fab" id="fPin" title="메모 핀">📍</button>
+    <button class="fab" id="fTable" title="비교표">▦</button>
+    <button class="fab" id="fMenu" title="메뉴">☰</button>
+  </div>
+
+  <section id="sheet" class="sheet">
+    <div class="grab" id="grab"></div>
+    <div id="panel"></div>
+  </section>
+
+  <div id="toast"></div>
+</div>
+
+<script src="config.js"></script>
+<script src="zones.js"></script>
+<script src="vendor/supabase.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
