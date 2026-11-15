@@ -852,9 +852,15 @@ function menuPanel(el) {
   const o = $("#mOut"); if (o) o.onclick = async () => { await Store.sb.auth.signOut(); location.reload(); };
 }
 function loginPanel(el) {
-  el.innerHTML = `<h2>로그인</h2><div class="sub">이메일로 받은 링크를 누르면 로그인돼요. 한 번 로그인하면 이 기기에서 계속 유지돼요.</div>
+  el.innerHTML = `<h2>로그인</h2><div class="sub">한 번 로그인하면 이 기기에서 계속 유지돼요.</div>
+   <button class="btn pri" id="gLogin" style="width:100%;padding:12px;font-size:15px">G&nbsp; 구글 계정으로 로그인</button>
+   <div class="mut small" style="margin:14px 0 4px">또는 이메일 링크로 로그인</div>
    <label class="f">이메일</label><input type="email" id="em" autocomplete="email" placeholder="you@example.com">
    <div class="row" style="margin-top:12px"><button class="btn pri" id="go">로그인 링크 받기</button></div><div id="msg" class="sub" style="margin-top:10px"></div>`;
+  $("#gLogin").onclick = async () => {
+    const { error } = await Store.sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + location.pathname } });
+    if (error) $("#msg").textContent = "구글 로그인 실패: " + error.message;
+  };
   $("#go").onclick = async () => {
     const email = $("#em").value.trim(); if (!email) return;
     $("#go").disabled = true;
