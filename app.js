@@ -116,6 +116,39 @@ function afterLoad() {
   setRegion(region, true);
 }
 
+/* ---------------- roadview ---------------- */
+let rvMode = false, rv = null, rvClient = null, rvOverlay = null, rvMarker = null;
+const rvBtn = (lat, lng) => lat != null && lng != null ? `<button class="btn" id="rvGo" data-lat="${lat}" data-lng="${lng}">👁 로드뷰</button>` : "";
+function setRvMode(on) {
+  rvMode = on; $("#fRv").classList.toggle("on", on);
+  if (!map) return;
+  if (on) { if (!rvOverlay) rvOverlay = new (K().RoadviewOverlay)(); rvOverlay.setMap(map); hint("파란 선 = 로드뷰가 있는 길. 지도를 누르면 그 자리 로드뷰가 열려요."); }
+  else { if (rvOverlay) rvOverlay.setMap(null); hint(""); closeRv(); }
+}
+function openRv(lat, lng) {
+  if (!map) return;
+  const box = $("#rv"); box.classList.add("on"); document.body.classList.add("rvon");
+  if (window.innerWidth < 900 && !sheetHidden) applySheet(Math.min(clampH(sheetH || 0), Math.round(vh() * 0.2)) || HIDE_H);
+  if (!rv) {
+    rv = new (K().Roadview)($("#rvView")); rvClient = new (K().RoadviewClient)();
+    K().event.addListener(rv, "position_changed", () => { const p = rv.getPosition(); if (rvMarker) rvMarker.setPosition(p); });
+    K().event.addListener(rv, "viewpoint_changed", () => { const v = rv.getViewpoint(); const m = $("#rvMk"); if (m) m.style.transform = `rotate(${v.pan}deg)`; });
+  }
+  const pos = LL(lat, lng);
+  rvClient.getNearestPanoId(pos, 60, id => {
+    if (!id) { $("#rvMsg").textContent = "근처 60m 안에 로드뷰가 없어요. 파란 선 위를 눌러 보세요."; $("#rvMsg").style.display = "block"; return; }
+    $("#rvMsg").style.display = "none";
+    rv.setPanoId(id, pos); setTimeout(() => rv.relayout(), 60);
+    if (!rvMarker) rvMarker = new (K().CustomOverlay)({ content: '<div class="rvmk"><div id="rvMk">▲</div></div>', yAnchor: .5, zIndex: 9 });
+    rvMarker.setPosition(pos); rvMarker.setMap(map);
+  });
+  setTimeout(() => map.relayout(), 60);
+}
+function closeRv() {
+  $("#rv").classList.remove("on"); document.body.classList.remove("rvon");
+  if (rvMarker) rvMarker.setMap(null); if (map) setTimeout(() => map.relayout(), 60);
+}
+
 /* ---------------- map ---------------- */
 let map = null, ov = [], draftOv = [], zoneOv = [], ignoreMapClick = 0;
 const K = () => window.kakao.maps;
@@ -261,6 +294,7 @@ function nearestLine(p, maxM = 70) { let b = null, bd = maxM; for (const L of li
 /* ---------------- interactions ---------------- */
 function onMapClick(lat, lon) {
   lat = +lat.toFixed(6); lon = +lon.toFixed(6);
+  if (rvMode && mode !== "line" && mode !== "add") { openRv(lat, lon); return; }
   if (mode === "line") { draft.push({ lat, lon }); renderDraft(); panel(); return; }
   if (mode === "add") { addAt(addKind, lat, lon); return; }
   if (sel) { sel = null; view = "home"; renderAll(); }
@@ -299,6 +333,8 @@ $("#slots").onclick = e => { const b = e.target.closest("button"); if (b) setSlo
 $("#fLine").onclick = () => setMode(mode === "line" ? "sel" : "line");
 $("#fAdd").onclick = () => { if (mode === "add") return setMode("sel"); sel = null; view = "add"; sheetSize("mid"); panel(); };
 $("#fTable").onclick = () => { sel = null; view = view === "table" ? "home" : "table"; sheetSize("max"); renderAll(); };
+$("#fRv").onclick = () => setRvMode(!rvMode);
+$("#rvClose").onclick = () => closeRv();
 $("#fMenu").onclick = () => { sel = null; view = view === "menu" ? "home" : "menu"; sheetSize("mid"); renderAll(); };
 $("#fVoice").onclick = () => { sel = null; view = "voice"; sheetSize("max"); panel(); if (SR) setTimeout(() => { const b = $("#vMic"); if (b && !rec) b.click(); }, 120); };
 $("#regionBtn").onclick = () => { sel = null; view = "regions"; sheetSize("mid"); panel(); };
@@ -520,7 +556,7 @@ const chip = r => r ? `<span class="chip" style="background:${COL[r]}">${r}</spa
 const sortedLines = () => list("lines").sort((a, b) => (a.no || 0) - (b.no || 0));
 function nextNo() { let m = 0; for (const L of list("lines")) m = Math.max(m, +L.no || 0); return m + 1; }
 const back = (el, label = "목록") => `<button class="btn" id="back">${label}</button>`;
-function bindBack() { const b = $("#back"); if (b) b.onclick = () => { sel = null; view = "home"; if ($("#sheet").classList.contains("max")) sheetSize("mid"); renderAll(); }; }
+function bindBack() { const r = $("#rvGo"); if (r) r.onclick = () => openRv(+r.dataset.lat, +r.dataset.lng); const b = $("#back"); if (b) b.onclick = () => { sel = null; view = "home"; if ($("#sheet").classList.contains("max")) sheetSize("mid"); renderAll(); }; }
 function confirmUI(msg, label) { return `<div class="row" style="margin-top:16px;justify-content:space-between"><span class="mut small">입력하면 자동 저장돼요</span><button class="btn danger" id="del">${label}</button></div><div class="confirm" id="cf">${msg}<div class="row" style="margin-top:6px"><button class="btn danger" id="delY">삭제</button><button class="btn" id="delN">취소</button></div></div>`; }
 function bindDel(fn) { $("#del").onclick = () => $("#cf").style.display = "block"; $("#delN").onclick = () => $("#cf").style.display = "none"; $("#delY").onclick = () => { sel = null; view = "home"; fn(); renderAll(); }; }
 function panel() {
@@ -583,7 +619,7 @@ function linePanel(el, id) {
   const L = DB.lines[id]; L.ratings = L.ratings || {}; L.notes = L.notes || {}; L.tags = L.tags || [];
   const stores = list("stores").filter(S => S.line_id === id);
   const lst = list("listings").filter(P => P.line_id === id);
-  el.innerHTML = `<div class="row" style="justify-content:space-between"><h2><span class="dot" style="margin-right:6px">${esc(L.no)}</span>라인</h2>${back(el)}</div>
+  el.innerHTML = `<div class="row" style="justify-content:space-between"><h2><span class="dot" style="margin-right:6px">${esc(L.no)}</span>라인</h2><span>${(() => { const q = L.pts?.[Math.floor((L.pts.length - 1) / 2)]; return q ? rvBtn(q.lat, q.lon) : ""; })()} ${back(el)}</span></div>
    <label class="f">라인 이름</label><input type="text" id="lName" value="${esc(L.name)}">
    <label class="f">구역</label><input type="text" id="lZone" value="${esc(L.zone || "")}" list="zl2"><datalist id="zl2">${zoneNames().map(z => `<option value="${esc(z)}">`).join("")}</datalist>
    <label class="f">${slotName(slot)} 유동인구</label>
@@ -630,7 +666,7 @@ function storePanel(el, id) {
   const S = DB.stores[id]; const obs = obsOf(id);
   const grid = SLOTS.map(([k, t]) => { const o = obs.find(o => o.slot === k); const st = obsState(o); return `<div data-s="${k}" class="${k === slot ? "cur" : ""}" style="background:${o ? st.c + "33" : "#f1f2f4"}">${t}<br><b>${esc(o ? obsText(o) : "—")}</b>${o ? `<br><span class="mut">${md(o.at)} ${hhmm(o.at)}</span>` : ""}</div>`; }).join("");
   const d = obsDraft;
-  el.innerHTML = `<div class="row" style="justify-content:space-between"><h2>매장</h2>${back(el)}</div>
+  el.innerHTML = `<div class="row" style="justify-content:space-between"><h2>매장</h2><span>${rvBtn(S.lat, S.lng)} ${back(el)}</span></div>
    <label class="f">상호</label><input type="text" id="sName" value="${esc(S.name)}" placeholder="예: 비바나폴리">
    <div class="row" style="gap:8px"><div style="flex:1"><label class="f">업종</label><input type="text" id="sCat" value="${esc(S.category || "")}" placeholder="예: 피자"></div>
    <div style="flex:1"><label class="f">라인</label><select id="sLine"><option value="">(없음)</option>${sortedLines().map(L => `<option value="${L.id}" ${S.line_id === L.id ? "selected" : ""}>${esc(L.no + ". " + L.name)}</option>`).join("")}</select></div></div>
@@ -677,7 +713,7 @@ function listingPanel(el, id) {
   const ex = num(P.area_ex), rent = num(P.rent), mg = num(P.mgmt);
   const perPy = ex && rent ? (rent / ex).toFixed(1) : null;
   const F = (k, label, ph, unit, mode = "decimal") => `<div style="flex:1"><label class="f">${label}${unit ? ` <span class="mut">(${unit})</span>` : ""}</label><input type="text" data-f="${k}" inputmode="${mode}" value="${esc(P[k] ?? "")}" placeholder="${ph}"></div>`;
-  el.innerHTML = `<div class="row" style="justify-content:space-between"><h2>매물</h2>${back(el)}</div>
+  el.innerHTML = `<div class="row" style="justify-content:space-between"><h2>매물</h2><span>${rvBtn(P.lat, P.lng)} ${back(el)}</span></div>
    <label class="f">이름</label><input type="text" id="xTitle" data-f="title" value="${esc(P.title || "")}" placeholder="예: 이너매스1 코너 (현 이춘명숙성회)">
    <label class="f">주소</label><input type="text" data-f="address" value="${esc(P.address || "")}">
    <label class="f">상태</label><div class="rate wrap">${LST_STATUS.map(s => `<button data-st="${s}" class="${P.status === s ? "on" : ""}">${s}</button>`).join("")}</div>
@@ -706,7 +742,7 @@ function listingPanel(el, id) {
 }
 function pinPanel(el, id) {
   const p = DB.pins[id];
-  el.innerHTML = `<div class="row" style="justify-content:space-between"><h2>메모</h2>${back(el)}</div>
+  el.innerHTML = `<div class="row" style="justify-content:space-between"><h2>메모</h2><span>${rvBtn(p.lat, p.lng)} ${back(el)}</span></div>
    <label class="f">제목</label><input type="text" id="pTitle" value="${esc(p.title || "")}" placeholder="예: 9번 출구 앞 버스정류장">
    <label class="f">보이는 시간대</label><select id="pSlot"><option value="all">전체 시간대</option>${SLOTS.map(([k, t]) => `<option value="${k}" ${p.slot === k ? "selected" : ""}>${t}</option>`).join("")}</select>
    <label class="f">내용</label><div class="row"><textarea id="pText">${esc(p.text || "")}</textarea><button class="btn mic" id="m3">🎤</button></div>
