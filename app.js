@@ -344,18 +344,25 @@ function toggleSheet(hide) {
 }
 $("#fSheet").onclick = () => toggleSheet();
 (() => {
+  // 손잡이 영역(회색 막대 + 그 주변)을 손가락이나 마우스로 끌어서 높이 조절. 짧게 누르면 숨기기/보이기
   const g = $("#grab"); let y0 = 0, h0 = 0, moved = false, drag = false;
-  g.addEventListener("pointerdown", e => { drag = true; moved = false; y0 = e.clientY; h0 = $("#sheet").getBoundingClientRect().height; g.setPointerCapture(e.pointerId); });
-  g.addEventListener("pointermove", e => { if (!drag) return; const dy = y0 - e.clientY; if (Math.abs(dy) > 4) moved = true; if (moved) applySheet(clampH(h0 + dy), false); });
-  const end = e => {
+  const start = y => { drag = true; moved = false; y0 = y; h0 = $("#sheet").getBoundingClientRect().height; };
+  const move = y => { if (!drag) return; const dy = y0 - y; if (Math.abs(dy) > 6) moved = true; if (moved) applySheet(clampH(h0 + dy), false); };
+  const end = cancel => {
     if (!drag) return; drag = false;
-    if (!moved) return toggleSheet();          // 손잡이 탭 = 숨기기/보이기
+    if (!moved) { if (!cancel) toggleSheet(); return; }
     const h = $("#sheet").getBoundingClientRect().height;
     if (h < 90) { sheetHidden = true; localStorage.setItem("sheetHidden", "1"); return applySheet(HIDE_H); }
     sheetHidden = false; localStorage.setItem("sheetHidden", "0");
     sheetH = Math.round(h); localStorage.setItem("sheetH", sheetH); applySheet(sheetH);
   };
-  g.addEventListener("pointerup", end); g.addEventListener("pointercancel", end);
+  g.addEventListener("touchstart", e => { start(e.touches[0].clientY); e.preventDefault(); }, { passive: false });
+  g.addEventListener("touchmove", e => { move(e.touches[0].clientY); e.preventDefault(); }, { passive: false });
+  g.addEventListener("touchend", e => { e.preventDefault(); end(false); }, { passive: false });
+  g.addEventListener("touchcancel", () => end(true));
+  g.addEventListener("mousedown", e => { start(e.clientY); e.preventDefault(); });
+  window.addEventListener("mousemove", e => move(e.clientY));
+  window.addEventListener("mouseup", () => end(false));
 })();
 document.addEventListener("keydown", e => { if (e.key === "Escape") { if (mode !== "sel") setMode("sel"); else { sel = null; view = "home"; renderAll(); } } });
 
