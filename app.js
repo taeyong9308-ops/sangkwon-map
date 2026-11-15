@@ -142,7 +142,7 @@ function openRv(lat, lng) {
     if (!rvMarker) rvMarker = new (K().CustomOverlay)({ content: '<div class="rvmk"><div id="rvMk">▲</div></div>', yAnchor: .5, zIndex: 9 });
     rvMarker.setPosition(pos); rvMarker.setMap(map);
   });
-  setTimeout(() => map.relayout(), 60);
+  setTimeout(() => { map.relayout(); map.setCenter(pos); }, 80);
 }
 function closeRv() {
   $("#rv").classList.remove("on"); document.body.classList.remove("rvon");
