@@ -433,6 +433,7 @@ function addObs(storeId, data) {
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const IS_ANDROID = /Android/i.test(navigator.userAgent);
 const SR_ERR = { "not-allowed": "마이크 권한이 막혀 있어요. 주소창 왼쪽 자물쇠 → 권한 → 마이크 허용 후 다시 눌러 주세요", "service-not-allowed": "이 브라우저에선 음성 인식이 막혀 있어요. 크롬 앱으로 열어 주세요", "network": "음성 인식 서버에 연결이 안 돼요(인터넷 확인). 키보드 🎤 받아쓰기를 써 주세요", "audio-capture": "마이크를 찾지 못했어요. 다른 앱이 마이크를 쓰고 있지 않은지 확인해 주세요", "language-not-supported": "한국어 음성 인식이 지원되지 않아요" };
+let splitDiv = null, splitL = "마곡", splitR = "발산";
 let rec = null, recBtn = null, recWant = false, recOnText = null, recFatal = false, recHeard = false;
 function recUI(on, msg) {
   document.querySelectorAll(".mic").forEach(b => b.classList.toggle("live", on && (b === recBtn || b.id === (recBtn && recBtn.id))));
@@ -587,6 +588,38 @@ function bindPhotos(obj, t, id) {
 /* ---------------- panels ---------------- */
 const chip = r => r ? `<span class="chip" style="background:${COL[r]}">${r}</span>` : `<span class="mut small">—</span>`;
 const sortedLines = () => list("lines").sort((a, b) => (a.no || 0) - (b.no || 0));
+const AREA_PFX = "상권:";
+const areaOf = L => ((L.tags || []).find(t => String(t).startsWith(AREA_PFX)) || "").slice(AREA_PFX.length);
+const lineMid = L => { const p = (L.pts || [])[Math.floor(((L.pts || []).length - 1) / 2)]; return p ? { lat: p.lat, lng: p.lon ?? p.lng } : null; };
+// 기준 라인보다 왼쪽(서쪽) = left, 오른쪽 = right. 각 상권 안에서 좌→우(약 120m 폭 세로 띠), 같은 띠 안은 북→남
+function planSplit(divId, leftName, rightName) {
+  const all = list("lines").filter(L => lineMid(L)); const D = DB.lines[divId]; const dm = D && lineMid(D); if (!dm) return [];
+  const minLng = Math.min(...all.map(L => lineMid(L).lng)), BAND = 0.0013;
+  const key = L => { const m = lineMid(L); return [Math.floor((m.lng - minLng) / BAND), -m.lat]; };
+  const cmp = (a, b) => { const x = key(a), y = key(b); return x[0] - y[0] || x[1] - y[1]; };
+  const left = all.filter(L => L.id === divId || lineMid(L).lng < dm.lng).sort(cmp), right = all.filter(L => L.id !== divId && lineMid(L).lng >= dm.lng).sort(cmp);
+  return [...left.map(L => ({ L, area: leftName })), ...right.map(L => ({ L, area: rightName }))].map((x, i) => ({ ...x, no: i + 1 }));
+}
+function splitPanel(el) {
+  const lines = sortedLines(); const def = (lines.find(L => String(L.no) === "7") || lines[0] || {}).id;
+  splitDiv = splitDiv || def;
+  const plan = planSplit(splitDiv, splitL, splitR);
+  el.innerHTML = `<div class="row" style="justify-content:space-between"><h2>상권 나누기 · 번호 다시 매기기</h2>${back(el, "닫기")}</div>
+   <div class="sub">기준 라인보다 왼쪽(서쪽)은 첫 번째 상권, 오른쪽은 두 번째 상권으로 나눠요. 기준 라인은 왼쪽에 들어가요. 번호는 상권별로 좌→우, 같은 줄은 북→남 순서예요.</div>
+   <label class="f">기준 라인</label><select id="spDiv">${lines.map(L => `<option value="${L.id}" ${L.id === splitDiv ? "selected" : ""}>${esc(L.no + ". " + L.name)}</option>`).join("")}</select>
+   <div class="row" style="gap:8px"><div style="flex:1"><label class="f">왼쪽 상권</label><input type="text" id="spL" value="${esc(splitL)}"></div><div style="flex:1"><label class="f">오른쪽 상권</label><input type="text" id="spR" value="${esc(splitR)}"></div></div>
+   <button class="btn pri" id="spGo" style="width:100%;padding:10px;margin:10px 0">이대로 적용 (${plan.length}개 라인)</button>
+   <div class="list">${plan.map(x => `<div class="it"><span class="dot">${x.no}</span><div style="flex:1">${esc(x.L.name)}<div class="mut small">${esc(x.area)} · 지금 ${esc(x.L.no)}번</div></div></div>`).join("")}</div>`;
+  bindBack();
+  $("#spDiv").onchange = e => { splitDiv = e.target.value; panel(); };
+  $("#spL").onchange = e => { splitL = e.target.value.trim() || "마곡"; panel(); };
+  $("#spR").onchange = e => { splitR = e.target.value.trim() || "발산"; panel(); };
+  $("#spGo").onclick = () => {
+    if (!confirm(`라인 ${plan.length}개의 번호를 다시 매기고 ${splitL} / ${splitR}로 나눌까요?`)) return;
+    for (const x of plan) put("lines", { ...x.L, no: x.no, tags: [AREA_PFX + x.area, ...(x.L.tags || []).filter(t => !String(t).startsWith(AREA_PFX))] });
+    toast("상권을 나누고 번호를 다시 매겼어요"); view = "home"; homeTab = "line"; renderAll();
+  };
+}
 function nextNo() { let m = 0; for (const L of list("lines")) m = Math.max(m, +L.no || 0); return m + 1; }
 const back = (el, label = "목록") => `<button class="btn" id="back">${label}</button>`;
 function bindBack() { const r = $("#rvGo"); if (r) r.onclick = () => openRv(+r.dataset.lat, +r.dataset.lng); const b = $("#back"); if (b) b.onclick = () => { sel = null; view = "home"; if ($("#sheet").classList.contains("max")) sheetSize("mid"); renderAll(); }; }
@@ -594,7 +627,7 @@ function confirmUI(msg, label) { return `<div class="row" style="margin-top:16px
 function bindDel(fn) { $("#del").onclick = () => $("#cf").style.display = "block"; $("#delN").onclick = () => $("#cf").style.display = "none"; $("#delY").onclick = () => { sel = null; view = "home"; fn(); renderAll(); }; }
 function panel() {
   const el = $("#panel");
-  const V = { feedback: feedbackPanel, setup: setupPanel, login: loginPanel, redraw: redrawPanel, add: addPanel, voice: voicePanel, search: searchPanel, table: tablePanel, menu: menuPanel, regions: regionsPanel };
+  const V = { split: splitPanel, feedback: feedbackPanel, setup: setupPanel, login: loginPanel, redraw: redrawPanel, add: addPanel, voice: voicePanel, search: searchPanel, table: tablePanel, menu: menuPanel, regions: regionsPanel };
   if (V[view]) return V[view](el);
   if (view === "draw" || mode === "line") return drawPanel(el);
   if (view === "line" && sel && DB.lines[sel.id]) return linePanel(el, sel.id);
@@ -608,7 +641,7 @@ function homePanel(el) {
   const L = sortedLines(), S = list("stores"), X = list("listings"), P = list("pins").filter(p => p.slot === "all" || p.slot === slot);
   const tabs = [["line", "라인", L.length], ["store", "매장", S.length], ["listing", "매물", X.length], ["pin", "메모", P.length]];
   let body = "";
-  if (homeTab === "line") body = L.map(L => `<div class="it" data-l="${L.id}"><span class="dot">${esc(L.no)}</span><div style="flex:1"><div>${esc(L.name)} ${chip((L.ratings || {})[slot] || "")}</div><div class="mut small">${esc(L.zone || "")}${(L.notes || {})[slot] ? " · " + esc(L.notes[slot].split("\n").slice(-1)[0].slice(0, 70)) : ""}</div></div></div>`).join("") || `<div class="mut">아직 라인이 없어요. 오른쪽 ／ 버튼으로 그려 보세요.</div>`;
+  if (homeTab === "line") body = L.map((L, i, arr) => `${areaOf(L) && areaOf(L) !== areaOf(arr[i - 1] || {}) ? `<div class="mut small" style="margin:10px 2px 4px;font-weight:700;color:var(--ink)">${esc(areaOf(L))} 상권</div>` : ""}<div class="it" data-l="${L.id}"><span class="dot">${esc(L.no)}</span><div style="flex:1"><div>${esc(L.name)} ${chip((L.ratings || {})[slot] || "")}</div><div class="mut small">${esc(L.zone || "")}${(L.notes || {})[slot] ? " · " + esc(L.notes[slot].split("\n").slice(-1)[0].slice(0, 70)) : ""}</div></div></div>`).join("") || `<div class="mut">아직 라인이 없어요. 오른쪽 ／ 버튼으로 그려 보세요.</div>`;
   if (homeTab === "store") body = S.sort((a, b) => a.name.localeCompare(b.name, "ko")).map(S => { const o = latestObs(S.id, slot), st = obsState(o); return `<div class="it" data-s="${S.id}"><span class="dot" style="background:${st.c};color:${st.c === "#ffffff" ? "#1d2430" : "#fff"};border:1px solid #ccd">${st.icon || ""}</span><div style="flex:1"><div>${esc(S.name || "(이름 없음)")} <span class="mut small">${esc(S.category || "")}</span></div><div class="mut small">${slotName(slot)}: ${esc(obsText(o))}${o ? " · " + md(o.at) + " " + hhmm(o.at) : ""}</div></div></div>`; }).join("") || `<div class="mut">아직 매장이 없어요. 검색해서 '매장으로 추가'하거나 ＋ 버튼으로 추가하세요.</div>`;
   if (homeTab === "listing") body = X.sort((a, b) => (a.status === "탈락") - (b.status === "탈락")).map(P => `<div class="it" data-x="${P.id}"><span class="dot" style="background:${srcCol(P)}">₩</span><div style="flex:1"><div>${esc(P.title || P.address || "(매물)")} <span class="tagx">${esc(P.status || "")}</span></div><div class="mut small">보증 ${won(num(P.deposit))} · 월 ${won(num(P.rent))}${num(P.premium) ? " · 권리 " + won(num(P.premium)) : ""}${num(P.area_ex) ? " · 전용 " + num(P.area_ex) + "평" : ""}</div></div></div>`).join("") || `<div class="mut">아직 매물이 없어요. ＋ 버튼 → 매물로 추가하세요.</div>`;
   if (homeTab === "pin") body = P.map(p => `<div class="it" data-p="${p.id}"><span class="dot" style="background:#0f766e">✎</span><div style="flex:1"><div>${esc(p.title || "(제목 없음)")}</div><div class="mut small">${esc((p.text || "").slice(0, 80))}</div></div></div>`).join("") || `<div class="mut small">이 시간대 메모 없음</div>`;
@@ -899,6 +932,7 @@ function menuPanel(el) {
    <div class="list">
     <div class="it" id="mFb">💡 앱 개선 요청 남기기·보기 <span class="mut small">(${Object.values(DB.feedback).filter(f => !f.done).length}건 대기)</span></div>
     <div class="it" id="mRegion">지역 바꾸기·새 지역</div>
+    <div class="it" id="mSplit">🔢 상권 나누기·라인 번호 다시 매기기</div>
     <div class="it" id="mZones">구역 경계 ${showZones ? "숨기기" : "보이기"}</div>
     <div class="it" id="mWatch">내 위치 계속 표시 ${watchId != null ? "끄기" : "켜기"}</div>
     <div class="it" id="mCsv">엑셀(CSV)로 내보내기 (라인·매장 기록·매물)</div>
@@ -909,6 +943,7 @@ function menuPanel(el) {
    <div class="mut small" style="margin-top:14px">폰 홈 화면에 추가: 아이폰은 사파리 공유 → '홈 화면에 추가', 안드로이드는 크롬 메뉴 → '홈 화면에 추가'.</div>`;
   bindBack();
   $("#mRegion").onclick = () => { view = "regions"; panel(); };
+  $("#mSplit").onclick = () => { view = "split"; panel(); };
   $("#mFb").onclick = () => { view = "feedback"; panel(); };
   $("#mZones").onclick = () => { showZones = !showZones; localStorage.setItem("zones", showZones ? "1" : "0"); drawZones(); panel(); };
   $("#mWatch").onclick = () => { if (watchId != null) stopWatch(); else startWatch(); panel(); };
