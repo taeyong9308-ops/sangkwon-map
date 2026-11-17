@@ -800,7 +800,7 @@ function voicePanel(el) {
     <span class="mut small" style="flex:1.4">${me ? (near ? `내 위치: <b>${esc(near.no + ". " + near.name)}</b> 근처` : "내 위치 근처 라인 없음") : `<a href="#" id="vLoc">내 위치 켜기</a> (이름 안 말해도 근처 라인에 붙어요)`}</span></div>
    <div class="row" style="align-items:flex-start;margin-top:8px"><textarea id="vText" style="min-height:110px" placeholder="${SR ? "🎤를 누르고 말하세요. 다시 누르면 멈춰요. 안 되면 키보드의 🎤(받아쓰기)로 말해도 돼요" : "키보드의 🎤(받아쓰기)로 말하세요"}">${esc(vText)}</textarea>${SR ? `<button class="btn mic big" id="vMic" title="음성 입력">🎤</button>` : ""}</div>
    <div id="vLive" class="mut small" style="min-height:18px"></div>
-   <div class="row"><button class="btn pri" id="vGo">정리하기</button>${vItems ? `<button class="btn" id="vReset">다시 쓰기</button>` : ""}</div>
+   <div class="row"><button class="btn pri" id="vGo">정리하기</button><button class="btn" id="vClear">🗑 지우기</button>${vItems ? `<button class="btn" id="vReset">다시 쓰기</button>` : ""}</div>
    ${vMsg ? `<div class="sub" style="margin-top:8px;color:var(--acc)">${esc(vMsg)}</div>` : ""}
    ${vItems && vItems.length ? `<h2 style="margin-top:14px">확인 후 저장</h2>${vItems.map((it, i) => `<div class="vi ${it.on ? "" : "off"}" data-i="${i}">
       <div class="row"><input type="checkbox" class="vOn" ${it.on ? "checked" : ""}>
@@ -820,6 +820,7 @@ function voicePanel(el) {
   const vl = $("#vLoc"); if (vl) vl.onclick = e => { e.preventDefault(); startWatch(); toast("위치를 찾는 중…"); setTimeout(panel, 3000); };
   const vm = $("#vMic"); if (vm) { if (recWant) { recBtn = vm; vm.classList.add("live"); } vm.onclick = () => startRec(vm, t => { vText = (vText ? vText.trimEnd() + "\n" : "") + t; const ta = $("#vText"); if (ta) ta.value = vText; }); }
   $("#vGo").onclick = () => { vText = $("#vText").value.trim(); if (!vText) { vMsg = "먼저 말하거나 적어 주세요."; return panel(); } stopRec(); vItems = parseVoice(vText, vSlot); vMsg = vItems.length ? "" : "정리할 내용을 못 찾았어요."; panel(); };
+  $("#vClear").onclick = () => { if (($("#vText").value || vItems) && !confirm("입력한 글과 정리 결과를 지울까요?")) return; vText = ""; vItems = null; vMsg = ""; panel(); };
   const rs = $("#vReset"); if (rs) rs.onclick = () => { vItems = null; vMsg = ""; panel(); };
   el.querySelectorAll(".vi").forEach(box => {
     const it = vItems[+box.dataset.i];
