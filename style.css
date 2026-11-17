@@ -1,4 +1,4 @@
-:root{--ink:#1d2430;--mut:#5d6675;--line:#e3e6ea;--bg:#f7f8fa;--acc:#3b2a8f;--hi:#D6452B;--mid:#F0A43A;--lo:#1E5BD8;--na:#B9BEC6;--sheet:46vh}
+:root{--ink:#1d2430;--mut:#5d6675;--line:#e3e6ea;--bg:#f7f8fa;--acc:#3b2a8f;--hi:#D6452B;--mid:#F0A43A;--lo:#7E98B3;--na:#B9BEC6;--sheet:46vh}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;overflow:hidden}
 body{font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Noto Sans KR','Malgun Gothic',sans-serif;color:var(--ink);background:var(--bg);font-size:15px;line-height:1.45}
@@ -120,5 +120,3 @@ table.cmp{width:100%;border-collapse:collapse;font-size:13px}table.cmp td,table.
 .rvmk{width:28px;height:28px;border-radius:50%;background:#b42318;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center}
 .rvmk div{color:#fff;font-size:12px;line-height:1}
 @media(min-width:900px){#rv{right:400px}.panelhid #rv{right:0}}
-
-#outbox{position:fixed;top:calc(env(safe-area-inset-top,0px) + 108px);left:50%;transform:translateX(-50%);z-index:60;display:none;background:#D6452B;color:#fff;border:0;border-radius:999px;padding:8px 14px;font:inherit;font-size:13px;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,.25);cursor:pointer;max-width:92vw}
