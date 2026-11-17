@@ -336,7 +336,7 @@ $("#fTable").onclick = () => { sel = null; view = view === "table" ? "home" : "t
 $("#fRv").onclick = () => setRvMode(!rvMode);
 $("#rvClose").onclick = () => closeRv();
 $("#fMenu").onclick = () => { sel = null; view = view === "menu" ? "home" : "menu"; sheetSize("mid"); renderAll(); };
-$("#fVoice").onclick = () => { sel = null; view = "voice"; sheetSize("max"); panel(); if (SR) setTimeout(() => { const b = $("#vMic"); if (b && !rec) b.click(); }, 120); };
+$("#fVoice").onclick = () => { sel = null; view = "voice"; sheetSize("max"); panel(); const b = $("#vMic"); if (b && !recWant) b.click(); };
 $("#regionBtn").onclick = () => { sel = null; view = "regions"; sheetSize("mid"); panel(); };
 $("#fLoc").onclick = () => {
   if (!navigator.geolocation) return toast("이 기기에서는 위치를 쓸 수 없어요");
@@ -431,19 +431,52 @@ function addObs(storeId, data) {
 
 /* ---------------- 음성 ---------------- */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null, recBtn = null;
+const IS_ANDROID = /Android/i.test(navigator.userAgent);
+const SR_ERR = { "not-allowed": "마이크 권한이 막혀 있어요. 주소창 왼쪽 자물쇠 → 권한 → 마이크 허용 후 다시 눌러 주세요", "service-not-allowed": "이 브라우저에선 음성 인식이 막혀 있어요. 크롬 앱으로 열어 주세요", "network": "음성 인식 서버에 연결이 안 돼요(인터넷 확인). 키보드 🎤 받아쓰기를 써 주세요", "audio-capture": "마이크를 찾지 못했어요. 다른 앱이 마이크를 쓰고 있지 않은지 확인해 주세요", "language-not-supported": "한국어 음성 인식이 지원되지 않아요" };
+let rec = null, recBtn = null, recWant = false, recOnText = null, recFatal = false, recHeard = false;
+function recUI(on, msg) {
+  document.querySelectorAll(".mic").forEach(b => b.classList.toggle("live", on && (b === recBtn || b.id === (recBtn && recBtn.id))));
+  const live = $("#vLive"); if (live) live.textContent = msg != null ? msg : (on ? "🔴 듣는 중… 말씀하세요" : "");
+}
+function stopRec() { recWant = false; if (rec) try { rec.stop(); } catch (e) {} recUI(false, ""); recBtn = null; }
 function startRec(btn, onText) {
-  if (rec) { rec.stop(); return; }
-  rec = new SR(); rec.lang = "ko-KR"; rec.interimResults = true; rec.continuous = true; recBtn = btn; btn.classList.add("live");
-  let committed = "";
-  rec.onresult = ev => {
+  if (!SR) { toast("이 브라우저는 음성 인식을 지원하지 않아요. 키보드 🎤 받아쓰기를 써 주세요", 4000); return; }
+  if (recWant || rec) { stopRec(); return; }
+  recBtn = btn; recOnText = onText; recWant = true; recFatal = false; recHeard = false;
+  recUI(true, "마이크 켜는 중…");
+  beginRec();
+}
+function beginRec() {
+  const r = new SR(); rec = r;
+  r.lang = "ko-KR"; r.interimResults = true; r.maxAlternatives = 1;
+  // 안드로이드 크롬은 continuous 모드가 결과를 중복·누락시켜서, 한 문장씩 받고 끝나면 다시 켠다
+  r.continuous = !IS_ANDROID;
+  let lastFinal = "";
+  r.onstart = () => recUI(true);
+  r.onresult = ev => {
     let interim = "";
-    for (let i = ev.resultIndex; i < ev.results.length; i++) { const t = ev.results[i][0].transcript; if (ev.results[i].isFinal) { committed += (committed ? " " : "") + t.trim(); onText(committed, true); committed = ""; } else interim += t; }
-    const live = $("#vLive"); if (live) live.textContent = interim;
+    for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      const t = ev.results[i][0].transcript.trim();
+      if (ev.results[i].isFinal) { if (t && t !== lastFinal) { lastFinal = t; recHeard = true; recOnText && recOnText(t, true); } }
+      else interim += t;
+    }
+    recUI(true, interim ? "🔴 " + interim : "🔴 듣는 중… 말씀하세요");
   };
-  rec.onend = () => { btn.classList.remove("live"); rec = null; recBtn = null; const live = $("#vLive"); if (live) live.textContent = ""; };
-  rec.onerror = e => { if (e.error === "not-allowed") toast("마이크 권한을 허용해 주세요", 4000); else if (e.error !== "no-speech" && e.error !== "aborted") toast("음성 인식이 끊겼어요. 다시 눌러 주세요"); };
-  try { rec.start(); } catch (e) { btn.classList.remove("live"); rec = null; }
+  r.onerror = e => {
+    if (e.error === "no-speech" || e.error === "aborted") return;
+    recFatal = true; recWant = false;
+    toast(SR_ERR[e.error] || "음성 인식 오류(" + e.error + "). 다시 눌러 주세요", 6000);
+    recUI(false, "⚠️ " + (SR_ERR[e.error] || "오류: " + e.error));
+  };
+  r.onend = () => {
+    if (rec !== r) return;
+    rec = null;
+    if (recWant && !recFatal) { setTimeout(() => { if (recWant && !rec) { try { beginRec(); } catch (e) { recWant = false; recUI(false); } } }, 150); return; }
+    recUI(false, recFatal ? undefined : (recHeard ? "" : "인식된 말이 없어요. 🎤를 눌러 다시 말해 주세요"));
+    if (recFatal) return; recBtn = null;
+  };
+  try { r.start(); }
+  catch (e) { rec = null; recWant = false; recUI(false, "⚠️ 음성 인식을 시작하지 못했어요: " + e.message); }
 }
 function mic(btn, ta) {
   if (!SR) { btn.style.display = "none"; return; }
@@ -765,7 +798,7 @@ function voicePanel(el) {
    <div class="sub">걸으면서 말하면 라인·매장별로 나눠 드려요. 저장 전에 확인할 수 있어요.<br>예: "옥소반 라인 유동 보통, 비바나폴리 만석 웨이팅 3팀, 마가렛 휴무"</div>
    <div class="row" style="gap:8px"><select id="vSlot" style="flex:1">${SLOTS.map(([k, t]) => `<option value="${k}" ${k === vSlot ? "selected" : ""}>${t}</option>`).join("")}</select>
     <span class="mut small" style="flex:1.4">${me ? (near ? `내 위치: <b>${esc(near.no + ". " + near.name)}</b> 근처` : "내 위치 근처 라인 없음") : `<a href="#" id="vLoc">내 위치 켜기</a> (이름 안 말해도 근처 라인에 붙어요)`}</span></div>
-   <div class="row" style="align-items:flex-start;margin-top:8px"><textarea id="vText" style="min-height:110px" placeholder="${SR ? "🎤를 누르고 말하세요. 다시 누르면 멈춰요" : "키보드의 🎤(받아쓰기)로 말하세요"}">${esc(vText)}</textarea>${SR ? `<button class="btn mic big" id="vMic" title="음성 입력">🎤</button>` : ""}</div>
+   <div class="row" style="align-items:flex-start;margin-top:8px"><textarea id="vText" style="min-height:110px" placeholder="${SR ? "🎤를 누르고 말하세요. 다시 누르면 멈춰요. 안 되면 키보드의 🎤(받아쓰기)로 말해도 돼요" : "키보드의 🎤(받아쓰기)로 말하세요"}">${esc(vText)}</textarea>${SR ? `<button class="btn mic big" id="vMic" title="음성 입력">🎤</button>` : ""}</div>
    <div id="vLive" class="mut small" style="min-height:18px"></div>
    <div class="row"><button class="btn pri" id="vGo">정리하기</button>${vItems ? `<button class="btn" id="vReset">다시 쓰기</button>` : ""}</div>
    ${vMsg ? `<div class="sub" style="margin-top:8px;color:var(--acc)">${esc(vMsg)}</div>` : ""}
@@ -785,8 +818,8 @@ function voicePanel(el) {
   $("#vSlot").onchange = e => { vSlot = e.target.value; if (vItems) vItems.forEach(x => x.slot = vSlot); };
   $("#vText").oninput = e => vText = e.target.value;
   const vl = $("#vLoc"); if (vl) vl.onclick = e => { e.preventDefault(); startWatch(); toast("위치를 찾는 중…"); setTimeout(panel, 3000); };
-  const vm = $("#vMic"); if (vm) { if (rec) vm.classList.add("live"); vm.onclick = () => startRec(vm, t => { vText = (vText ? vText.trimEnd() + "\n" : "") + t; const ta = $("#vText"); if (ta) ta.value = vText; }); }
-  $("#vGo").onclick = () => { vText = $("#vText").value.trim(); if (!vText) { vMsg = "먼저 말하거나 적어 주세요."; return panel(); } if (rec) rec.stop(); vItems = parseVoice(vText, vSlot); vMsg = vItems.length ? "" : "정리할 내용을 못 찾았어요."; panel(); };
+  const vm = $("#vMic"); if (vm) { if (recWant) { recBtn = vm; vm.classList.add("live"); } vm.onclick = () => startRec(vm, t => { vText = (vText ? vText.trimEnd() + "\n" : "") + t; const ta = $("#vText"); if (ta) ta.value = vText; }); }
+  $("#vGo").onclick = () => { vText = $("#vText").value.trim(); if (!vText) { vMsg = "먼저 말하거나 적어 주세요."; return panel(); } stopRec(); vItems = parseVoice(vText, vSlot); vMsg = vItems.length ? "" : "정리할 내용을 못 찾았어요."; panel(); };
   const rs = $("#vReset"); if (rs) rs.onclick = () => { vItems = null; vMsg = ""; panel(); };
   el.querySelectorAll(".vi").forEach(box => {
     const it = vItems[+box.dataset.i];
