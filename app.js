@@ -793,6 +793,7 @@ function listingPanel(el, id) {
    ${P.line_id && DB.lines[P.line_id] ? `<div class="mini" style="margin-top:6px">${SLOTS.map(([k, t]) => { const r = (DB.lines[P.line_id].ratings || {})[k]; return `<div style="background:${r ? COL[r] + "33" : "#f1f2f4"}">${t}<br><b>${r || "—"}</b></div>`; }).join("")}</div>` : ""}
    <label class="f">메모</label><div class="row"><textarea data-f="memo" placeholder="예: 주차 원활, 공실 리스크, 중개사 연락처">${esc(P.memo || "")}</textarea><button class="btn mic" id="m5">🎤</button></div>
    ${photosUI(P)}
+   <button class="btn pri" id="xSave" style="width:100%;padding:12px;margin-top:12px;font-size:16px">💾 저장</button>
    <div class="row" style="margin-top:10px"><button class="btn" id="xMove">위치 옮기기</button></div>
    ${confirmUI("이 매물을 지울까요?", "매물 삭제")}`;
   bindBack();
@@ -802,6 +803,16 @@ function listingPanel(el, id) {
   el.querySelectorAll("[data-st]").forEach(b => b.onclick = () => { P.status = b.dataset.st; Store.save("listings", id, 0); renderAll(); });
   $("#xLine").onchange = e => { P.line_id = e.target.value || null; Store.save("listings", id, 0); panel(); };
   mic($("#m5"), el.querySelector('textarea[data-f="memo"]'));
+  $("#xSave").onclick = async () => {
+    const b = $("#xSave"); b.disabled = true; b.textContent = "저장 중…";
+    el.querySelectorAll("[data-f]").forEach(i => P[i.dataset.f] = i.value);
+    P.updated_at = now();
+    try {
+      if (Store.kind === "local") Store.saveLocal();
+      else { clearTimeout(Store.timers["listings" + id]); const { error } = await Store.sb.from("listings").upsert(P); if (error) throw error; }
+      toast("매물을 저장했어요 ✓"); sel = null; view = "home"; homeTab = "listing"; localStorage.setItem("homeTab", "listing"); if ($("#sheet").classList.contains("max")) sheetSize("mid"); renderAll();
+    } catch (e) { b.disabled = false; b.textContent = "💾 저장"; toast("저장 실패: " + (e.message || e) + " · 인터넷 연결을 확인하고 다시 눌러 주세요", 6000); }
+  };
   $("#xMove").onclick = () => { moveId = { t: "listings", id }; hint("새 위치를 지도에서 누르세요."); mode = "move"; };
   bindPhotos(P, "listings", id);
   bindDel(() => Store.remove("listings", id));
