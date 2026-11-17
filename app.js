@@ -4,7 +4,7 @@
 "use strict";
 const CFG = window.APP_CONFIG || {};
 const SLOTS = [["wl","평일 점심"],["wd","평일 저녁"],["sl","주말 점심"],["sd","주말 저녁"]];
-const COL = {"많음":"#D6452B","보통":"#F0A43A","적음":"#7E98B3","":"#9AA3AE"};
+const COL = {"많음":"#D6452B","보통":"#F0A43A","적음":"#1E5BD8","":"#9AA3AE"};
 const TAGS = ["직장인","가족·유모차","어르신","커플","주민","퇴근 통행","목적 방문","임대문의 많음","응달·북향","야장","배달 많음","웨이팅","주말 휴무 많음"];
 const LST_STATUS = ["검토중","임장 완료","보류","탈락","협의중","계약"];
 const OPEN = ["영업","준비중","휴무"];
@@ -62,6 +62,7 @@ const Store = {
     const bad = res.find(r => r.error); if (bad) { toast("불러오기 실패: " + bad.error.message, 5000); return; }
     TABLES.forEach((t, i) => { DB[t] = {}; res[i].data.forEach(r => DB[t][r.id] = r); });
     afterLoad();
+    if (Outbox.count()) { Outbox.failed = true; Outbox.badge(); setTimeout(() => Outbox.retry(), 500); }
     if (!this.ch) {
       let ch = this.sb.channel("rt");
       TABLES.forEach(t => ch = ch.on("postgres_changes", { event: "*", schema: "public", table: t }, p => this.remote(t, p)));
@@ -78,18 +79,25 @@ const Store = {
     r.updated_at = now();
     if (this.kind === "local") { clearTimeout(this.timers.local); this.timers.local = setTimeout(() => this.saveLocal(), ms ? 300 : 0); return; }
     const key = t + id; this.pending[key] = true;
+    Outbox.add(t, r);   // 보내기 전에 폰에 먼저 보관 (앱을 바로 닫거나 네트워크가 끊겨도 안 사라지게)
     clearTimeout(this.timers[key]); this.timers[key] = setTimeout(() => this.flush(t, id), ms);
   },
   async flush(t, id) {
     const key = t + id;
+    clearTimeout(this.timers[key]); delete this.timers[key];
     if (this.busy[key]) { this.busy[key] = "again"; return; }
     this.busy[key] = true;
     const row = DB[t][id];
-    if (row) { const { error } = await this.sb.from(t).upsert(row); if (error) toast("저장 실패: " + error.message, 5000); }
+    let ok = true;
+    if (row) {
+      try { const { error } = await this.sb.from(t).upsert(row); if (error) throw error; Outbox.done(t, id, row.updated_at); }
+      catch (e) { ok = false; Outbox.fail(e); }
+    }
     const again = this.busy[key] === "again"; delete this.busy[key];
     if (again) return this.flush(t, id);
-    setTimeout(() => delete this.pending[key], 1500);
+    if (ok) setTimeout(() => delete this.pending[key], 1500);
   },
+  flushAll() { Object.keys(this.timers).forEach(k => { if (k === "local") return; const m = /^([a-z_]+)(.+)$/.exec(k); if (m && TABLES.includes(m[1])) this.flush(m[1], m[2]); }); },
   async remove(t, id) {
     delete DB[t][id];
     if (this.kind === "local") { this.saveLocal(); return; }
@@ -104,6 +112,58 @@ const Store = {
     return this.sb.storage.from("photos").getPublicUrl(path).data.publicUrl;
   }
 };
+/* 미전송 보관함: 저장 실패·앱 종료로 기입이 사라지지 않게 폰(localStorage)에 보관 후 자동 재전송 */
+const OBKEY = "sangkwon-outbox-v1";
+const Outbox = {
+  q: (() => { try { return JSON.parse(localStorage.getItem(OBKEY) || "{}"); } catch (e) { return {}; } })(),
+  failed: false, retryT: null,
+  persist() { try { localStorage.setItem(OBKEY, JSON.stringify(this.q)); } catch (e) {} this.badge(); },
+  add(t, row) { this.q[t + "|" + row.id] = { t, row: JSON.parse(JSON.stringify(row)) }; this.persist(); },
+  done(t, id, at) { const k = t + "|" + id, e = this.q[k]; if (e && (e.row.updated_at || "") <= (at || "")) { delete this.q[k]; this.failed = false; this.persist(); } },
+  fail(e) { this.failed = true; this.badge(); clearTimeout(this.retryT); this.retryT = setTimeout(() => this.retry(), 20000); },
+  count() { return Object.keys(this.q).length; },
+  badge() {
+    let el = document.getElementById("outbox"); const n = this.count();
+    if (!el) { el = document.createElement("button"); el.id = "outbox"; el.onclick = () => this.retry(true); document.body.appendChild(el); }
+    el.style.display = n && this.failed ? "block" : "none";
+    el.textContent = `⚠ 서버에 안 올라간 기입 ${n}건 · 눌러서 다시 보내기`;
+  },
+  // 앱을 다시 열었을 때: 보관함 기입을 화면에 반영하고 서버로 재전송 (서버가 더 최신이면 시간대 판정·메모는 항목별로 합침)
+  async retry(manual) {
+    if (Store.kind !== "supa" || !Store.user) return;
+    const items = Object.values(this.q); if (!items.length) { this.failed = false; this.badge(); return; }
+    let left = 0;
+    for (const { t, row } of items) {
+      try {
+        const { data: srv, error: e1 } = await Store.sb.from(t).select("*").eq("id", row.id).maybeSingle(); if (e1) throw e1;
+        let out = row;
+        if (srv && (srv.updated_at || "") > (row.updated_at || "")) {
+          out = { ...srv };
+          for (const f of Object.keys(row)) {
+            const a = row[f], b = srv[f];
+            if (a && typeof a === "object" && !Array.isArray(a) && b && typeof b === "object" && !Array.isArray(b)) {
+              out[f] = { ...b };
+              for (const k of Object.keys(a)) {
+                if (!a[k] || a[k] === b[k]) continue;
+                if (f === "notes") { const have = String(b[k] || "").split("\n"); const add = String(a[k]).split("\n").filter(x => x && !have.includes(x)); out[f][k] = [b[k], ...add].filter(Boolean).join("\n"); }
+                else out[f][k] = a[k];
+              }
+            }
+          }
+          out.updated_at = now();
+        }
+        const { error } = await Store.sb.from(t).upsert(out); if (error) throw error;
+        DB[t][out.id] = out; delete this.q[t + "|" + row.id]; delete Store.pending[t + row.id];
+      } catch (e) { left++; }
+    }
+    this.failed = left > 0; this.persist(); renderAll(true);
+    if (left) { clearTimeout(this.retryT); this.retryT = setTimeout(() => this.retry(), 30000); if (manual) toast(`아직 ${left}건 못 보냈어요. 네트워크 확인 후 다시 눌러 주세요`, 3500); }
+    else if (manual || items.length) toast(`미전송 기입 ${items.length}건을 서버에 올렸어요 ✓`, 3000);
+  }
+};
+window.addEventListener("online", () => Outbox.retry());
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") { if (Store.kind === "supa") Store.flushAll(); } else Outbox.retry(); });
+window.addEventListener("pagehide", () => { if (Store.kind === "supa") Store.flushAll(); });
 function put(t, row, ms = 0) { if (!row.id) row.id = uid(); if (!row.created_at) row.created_at = now(); if (t !== "regions" && !row.region_id) row.region_id = region; DB[t][row.id] = row; Store.save(t, row.id, ms); return row; }
 function afterLoad() {
   if (!Object.keys(DB.regions).length) {
